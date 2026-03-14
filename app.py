@@ -359,10 +359,8 @@ if "do_reset" not in st.session_state:
 if st.session_state.do_reset:
     n_t = len(st.session_state.portfolio_tickers)
     eq  = round(1.0 / n_t, 6) if n_t > 0 else 1.0
-    st.session_state.manual_weights = {t: eq for t in st.session_state.portfolio_tickers}
-    # Forza aggiornamento dei widget number_input
-    for t in st.session_state.portfolio_tickers:
-        st.session_state[f"w_{t}"] = eq
+    # Svuota manual_weights — i widget leggeranno equal_w come default
+    st.session_state.manual_weights = {}
     st.session_state.do_reset = False
 
 
@@ -429,16 +427,19 @@ with st.sidebar:
                 unsafe_allow_html=True
             )
         with col2:
-            stored_w = float(st.session_state.manual_weights.get(ticker, equal_w))
+            # Usa il valore nel session_state del widget se esiste,
+            # altrimenti equal_w. Non scrivere mai manualmente su "w_{ticker}".
+            widget_key = f"w_{ticker}"
+            if widget_key not in st.session_state:
+                st.session_state[widget_key] = round(equal_w, 6)
             new_w = st.number_input(
                 label="peso",
                 min_value=0.0, max_value=1.0,
-                value=round(stored_w, 6),
+                value=round(float(st.session_state[widget_key]), 6),
                 step=0.0001, format="%.4f",
-                key=f"w_{ticker}",
+                key=widget_key,
                 label_visibility="collapsed"
             )
-            # Registra sempre il valore corrente
             st.session_state.manual_weights[ticker] = new_w
         with col3:
             if st.button("🗑️", key=f"del_{ticker}"):
@@ -473,9 +474,14 @@ with st.sidebar:
             if abs(total_w - 1.0) > 0.015:
                 st.caption("I pesi verranno normalizzati automaticamente a 1.0")
 
-    # Bottone reset — usa flag per evitare conflitti con number_input
+    # Reset Equal Weight — cancella i widget e svuota manual_weights
     if st.button("🔄 Reset Equal Weight"):
-        st.session_state.do_reset = True
+        st.session_state.manual_weights = {}
+        # Cancella le chiavi dei widget così al prossimo render
+        # vengono ricreati con equal_w come valore di default
+        for t in list(st.session_state.portfolio_tickers):
+            st.session_state.pop(f"w_{t}", None)
+        st.session_state.do_reset = False
         st.rerun()
 
     st.markdown('<p class="section-title">Parametri simulazione</p>', unsafe_allow_html=True)
