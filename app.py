@@ -136,7 +136,12 @@ def download_data(tickers: List[str], benchmark: str,
     for idx, symbol in enumerate(all_symbols):
         status.text(f"⬇️  Download: {symbol} ({idx+1}/{len(all_symbols)})")
         try:
-            tv_data = tv.get_hist(symbol=symbol, exchange="",
+            # Gestisce formato EXCHANGE:SYMBOL (es. MIL:ENI) e simbolo semplice (es. AAPL)
+            if ":" in symbol:
+                exch, sym = symbol.split(":", 1)
+            else:
+                exch, sym = "", symbol
+            tv_data = tv.get_hist(symbol=sym, exchange=exch,
                                   interval=Interval.in_daily, n_bars=n_bars)
             if tv_data is not None and not tv_data.empty:
                 tv_data.index = tv_data.index.normalize()
@@ -270,133 +275,70 @@ def compute_rolling_optimal(port_ret: pd.DataFrame) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DATABASE TICKER — nome completo → simbolo
+# RICERCA LIVE — TradingView Symbol Search API (tutti gli strumenti mondiali)
 # ══════════════════════════════════════════════════════════════════════════════
 
-TICKER_DB: Dict[str, str] = {
-    # S&P 500 — tutti i principali
-    "Apple": "AAPL", "Microsoft": "MSFT", "Amazon": "AMZN", "Alphabet": "GOOGL",
-    "Google": "GOOGL", "Meta": "META", "Tesla": "TSLA", "Nvidia": "NVDA",
-    "Berkshire Hathaway": "BRK.B", "JPMorgan": "JPM", "Johnson & Johnson": "JNJ",
-    "Visa": "V", "Mastercard": "MA", "Procter & Gamble": "PG", "UnitedHealth": "UNH",
-    "Exxon Mobil": "XOM", "Home Depot": "HD", "Chevron": "CVX", "Abbvie": "ABBV",
-    "Eli Lilly": "LLY", "Costco": "COST", "PepsiCo": "PEP", "Coca Cola": "KO",
-    "Merck": "MRK", "Netflix": "NFLX", "Walt Disney": "DIS", "Salesforce": "CRM",
-    "Adobe": "ADBE", "Oracle": "ORCL", "Intel": "INTC", "AMD": "AMD",
-    "Qualcomm": "QCOM", "Texas Instruments": "TXN", "Broadcom": "AVGO",
-    "Goldman Sachs": "GS", "Morgan Stanley": "MS", "Bank of America": "BAC",
-    "Citigroup": "C", "Wells Fargo": "WFC", "American Express": "AXP",
-    "Boeing": "BA", "Caterpillar": "CAT", "Deere": "DE", "3M": "MMM",
-    "General Electric": "GE", "Honeywell": "HON", "Raytheon": "RTX",
-    "Lockheed Martin": "LMT", "Northrop Grumman": "NOC",
-    "Starbucks": "SBUX", "McDonald's": "MCD", "Nike": "NKE",
-    "Pfizer": "PFE", "Moderna": "MRNA", "Bristol-Myers Squibb": "BMY",
-    "Palo Alto Networks": "PANW", "CrowdStrike": "CRWD", "Fortinet": "FTNT",
-    "Airbnb": "ABNB", "Uber": "UBER", "Palantir": "PLTR",
-    "Snowflake": "SNOW", "Datadog": "DDOG", "Cloudflare": "NET",
-    "PayPal": "PYPL", "Block": "SQ", "Intuit": "INTU", "ServiceNow": "NOW",
-    "Workday": "WDAY", "Zoom": "ZM", "Spotify": "SPOT",
-    "Accenture": "ACN", "Automatic Data Processing": "ADP",
-    "Fiserv": "FI", "Fidelity National": "FIS", "Global Payments": "GPN",
-    "Moody's": "MCO", "S&P Global": "SPGI", "Intercontinental Exchange": "ICE",
-    "CME Group": "CME", "Nasdaq Inc": "NDAQ",
-    "Abbott Laboratories": "ABT", "Medtronic": "MDT", "Stryker": "SYK",
-    "Boston Scientific": "BSX", "Zimmer Biomet": "ZBH", "Becton Dickinson": "BDX",
-    "Thermo Fisher": "TMO", "Agilent": "A", "Waters": "WAT",
-    "Waste Management": "WM", "Republic Services": "RSG",
-    "American Tower": "AMT", "Crown Castle": "CCI", "Prologis": "PLD",
-    "Simon Property": "SPG", "Realty Income": "O",
-    "NextEra Energy": "NEE", "Duke Energy": "DUK", "Southern Company": "SO",
-    "Dominion Energy": "D", "Exelon": "EXC", "Sempra": "SRE",
-    "ConocoPhillips": "COP", "Pioneer Natural Resources": "PXD",
-    "Schlumberger": "SLB", "Halliburton": "HAL", "Baker Hughes": "BKR",
-    "Colgate-Palmolive": "CL", "Kimberly-Clark": "KMB", "Clorox": "CLX",
-    "Estee Lauder": "EL", "Church & Dwight": "CHD",
-    "Ross Stores": "ROST", "TJX Companies": "TJX", "Burlington": "BURL",
-    "Tractor Supply": "TSCO", "O'Reilly Automotive": "ORLY",
-    "Sherwin-Williams": "SHW", "Ball Corporation": "BALL",
-    "Rollins": "ROL", "IDEX Corporation": "IEX",
-    "AAON Inc": "AAON", "AutoZone": "AZO", "Amphenol": "APH",
-    "Danaher": "DHR", "Mettler-Toledo": "MTD",
-    "Roper Technologies": "ROP", "Parker Hannifin": "PH",
-    "Illinois Tool Works": "ITW", "Emerson Electric": "EMR",
-    "Rockwell Automation": "ROK", "Fortive": "FTV",
-    "Verisk Analytics": "VRSK", "Fair Isaac": "FICO", "Gartner": "IT",
-    "Costar Group": "CSGP", "Zillow": "Z",
-    "Charter Communications": "CHTR", "Comcast": "CMCSA",
-    "T-Mobile": "TMUS", "Verizon": "VZ", "AT&T": "T",
-    "Motorola Solutions": "MSI", "Keysight": "KEYS",
-    "Analog Devices": "ADI", "Microchip Technology": "MCHP",
-    "KLA Corporation": "KLAC", "Lam Research": "LRCX",
-    "Applied Materials": "AMAT", "ASML Holding": "ASML",
-    "Marvell Technology": "MRVL", "Micron": "MU", "Western Digital": "WDC",
-    "Seagate": "STX", "Corning": "GLW",
-    "FedEx": "FDX", "UPS": "UPS", "Norfolk Southern": "NSC",
-    "Union Pacific": "UNP", "CSX": "CSX",
-    "American Airlines": "AAL", "Delta": "DAL", "Southwest": "LUV",
-    "United Airlines": "UAL", "Carnival": "CCL", "Royal Caribbean": "RCL",
-    "Marriott": "MAR", "Hilton": "HLT", "Wyndham": "WH",
-    "Las Vegas Sands": "LVS", "MGM Resorts": "MGM", "Wynn": "WYNN",
-    "Chipotle": "CMG", "Yum Brands": "YUM", "Darden": "DRI",
-    "Dollar General": "DG", "Dollar Tree": "DLTR", "Target": "TGT",
-    "Walmart": "WMT", "Kroger": "KR", "Sysco": "SYY",
-    "CVS Health": "CVS", "Walgreens": "WBA", "Cardinal Health": "CAH",
-    "McKesson": "MCK", "AmerisourceBergen": "ABC",
-    "Cigna": "CI", "Humana": "HUM", "Centene": "CNC",
-    "Regeneron": "REGN", "Biogen": "BIIB", "Vertex": "VRTX",
-    "Gilead": "GILD", "Amgen": "AMGN", "Celanese": "CE",
-    "Dow Chemical": "DOW", "DuPont": "DD", "LyondellBasell": "LYB",
-    "Air Products": "APD", "Linde": "LIN", "PPG Industries": "PPG",
-    "Freeport-McMoRan": "FCX", "Newmont": "NEM", "Nucor": "NUE",
-    # ETF
-    "S&P 500 ETF SPY": "SPY", "Nasdaq ETF QQQ": "QQQ",
-    "Total Market VTI": "VTI", "World ETF VT": "VT",
-    "Emerging Markets VWO": "VWO", "Bond ETF BND": "BND",
-    "Gold ETF GLD": "GLD", "Silver ETF SLV": "SLV",
-    "Real Estate ETF VNQ": "VNQ", "Tech ETF FTEC": "FTEC",
-    "Dividend ETF VYM": "VYM", "Growth ETF VUG": "VUG",
-    "Value ETF VTV": "VTV", "Small Cap ETF VB": "VB",
-    "Europe ETF VGK": "VGK", "Asia ETF VPL": "VPL",
-    # Indici
-    "S&P 500 Total Return": "SPXTR", "Nasdaq 100": "NDX",
-    "Dow Jones": "DJI", "Russell 2000": "RUT", "VIX": "VIX",
-    # Europa
-    "LVMH": "LVMH", "SAP": "SAP", "Nestlé": "NESN",
-    "Novartis": "NVS", "Roche": "ROG", "Hermes": "RMS",
-    "Volkswagen": "VOW3", "BMW": "BMW", "Mercedes": "MBG",
-    "Siemens": "SIE", "Allianz": "ALV", "Airbus": "AIR",
-    "Total Energies": "TTE", "BNP Paribas": "BNP",
-    "Unilever": "UL", "AstraZeneca": "AZN", "GlaxoSmithKline": "GSK",
-    "BP": "BP", "Shell": "SHEL", "Rio Tinto": "RIO",
-}
+import requests
+import re as _re
 
-def search_ticker(query: str) -> List[Tuple[str, str]]:
+@st.cache_data(ttl=30)
+def search_tv_live(query: str, limit: int = 12) -> List[Dict]:
     """
-    Cerca ticker per nome o simbolo nel database.
-    Restituisce lista di (nome_display, simbolo).
-    Se non trovato nel DB, restituisce lista vuota
-    (il simbolo viene comunque aggiunto come custom).
+    Interroga l'API pubblica di TradingView symbol search in tempo reale.
+    Copre: azioni (tutti gli exchange mondiali), ETF, indici, crypto,
+    materie prime, bond, forex.
+    Nessun database locale — risultati sempre aggiornati.
     """
-    q = query.strip().lower()
-    if not q or len(q) < 1:
+    q = query.strip()
+    if not q:
         return []
-
-    results: Dict[str, str] = {}  # symbol → display_name
-
-    for name, symbol in TICKER_DB.items():
-        # Match esatto simbolo o nome
-        if symbol.lower() == q or name.lower() == q:
-            results[symbol] = f"{symbol} — {name}"
-        # Match parziale su simbolo o nome
-        elif q in symbol.lower() or q in name.lower():
-            results[symbol] = f"{symbol} — {name}"
-
-    # Ordina: prima i match esatti sul simbolo
-    sorted_results = sorted(
-        results.items(),
-        key=lambda x: (0 if x[0].lower().startswith(q) else 1)
-    )
-    return [(display, sym) for sym, display in sorted_results[:8]]
+    try:
+        url = "https://symbol-search.tradingview.com/symbol_search/v3/"
+        params = {
+            "text": q,
+            "hl": "0",
+            "exchange": "",
+            "lang": "it",
+            "search_type": "undefined",
+            "domain": "production",
+            "sort_by_country": "IT",
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "Referer": "https://www.tradingview.com/",
+            "Origin": "https://www.tradingview.com",
+        }
+        resp = requests.get(url, params=params, headers=headers, timeout=5)
+        if resp.status_code != 200:
+            return []
+        raw = resp.json()
+        symbols_list = raw.get("symbols", raw) if isinstance(raw, dict) else raw
+        results = []
+        for item in symbols_list[:limit]:
+            sym      = _re.sub(r"<[^>]+>", "", str(item.get("symbol", "")))
+            exchange = str(item.get("exchange", ""))
+            desc     = _re.sub(r"<[^>]+>", "", str(item.get("description", "")))
+            stype    = str(item.get("type", ""))
+            if not sym:
+                continue
+            # Icona per tipo strumento
+            type_icon = {
+                "stock": "📈", "fund": "📦", "index": "🗂️",
+                "crypto": "🪙", "forex": "💱", "futures": "⚙️",
+                "bond": "🏦", "economic": "📊",
+            }.get(stype, "📌")
+            results.append({
+                "symbol":      sym,
+                "exchange":    exchange,
+                "description": desc,
+                "type":        stype,
+                "type_icon":   type_icon,
+                "display":     f"{type_icon} {sym} ({exchange}) — {desc}",
+                "tv_symbol":   f"{exchange}:{sym}" if exchange else sym,
+            })
+        return results
+    except Exception:
+        return []
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -446,35 +388,39 @@ with st.sidebar:
     )
 
     if search_query and len(search_query.strip()) >= 1:
-        sym_upper = search_query.strip().upper()
-        results   = search_ticker(search_query)
+        # Ricerca live su TradingView — nessun database locale
+        with st.spinner("🔍 Ricerca su TradingView..."):
+            live_results = search_tv_live(search_query, limit=12)
 
-        if results:
-            # Mostra i risultati trovati nel DB
-            for display, symbol in results:
-                already = symbol in st.session_state.portfolio_tickers
-                col_a, col_b = st.columns([4, 1])
+        if live_results:
+            st.caption(f"{len(live_results)} risultati trovati:")
+            for item in live_results:
+                tv_sym  = item["tv_symbol"]   # es. MIL:ENI
+                display = item["display"]      # es. 📈 ENI (MIL) — Eni SpA
+                already = tv_sym in st.session_state.portfolio_tickers
+                col_a, col_b = st.columns([5, 1])
                 with col_a:
                     color = "#6b7280" if already else "#e8eaf0"
                     st.markdown(
-                        f"<span style='font-size:12px;font-family:DM Mono;color:{color}'>{display}</span>",
+                        f"<span style='font-size:11px;font-family:DM Mono;color:{color}'>{display}</span>",
                         unsafe_allow_html=True
                     )
                 with col_b:
                     if already:
-                        st.markdown("✅", unsafe_allow_html=True)
+                        st.markdown("✅")
                     else:
-                        if st.button("➕", key=f"add_{symbol}"):
-                            st.session_state.portfolio_tickers.append(symbol)
+                        if st.button("➕", key=f"add_{tv_sym}"):
+                            st.session_state.portfolio_tickers.append(tv_sym)
                             st.rerun()
         else:
-            # Non trovato nel DB → aggiunta come simbolo custom diretto
+            # API non raggiungibile o nessun risultato → aggiunta manuale
+            sym_upper = search_query.strip().upper()
+            st.warning("Nessun risultato live. Puoi aggiungere il simbolo manualmente:")
             already = sym_upper in st.session_state.portfolio_tickers
             if already:
                 st.success(f"✅ {sym_upper} già nel portafoglio")
             else:
-                st.info(f"Simbolo **{sym_upper}** non trovato nel database.\nVerrà aggiunto come simbolo custom (TradingView verificherà la disponibilità dei dati).")
-                if st.button(f"➕ Aggiungi {sym_upper} come custom"):
+                if st.button(f"➕ Aggiungi {sym_upper}"):
                     st.session_state.portfolio_tickers.append(sym_upper)
                     st.rerun()
 
