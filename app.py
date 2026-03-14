@@ -270,8 +270,91 @@ def compute_rolling_optimal(port_ret: pd.DataFrame) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DATABASE TICKER — nome → simbolo TradingView
+# ══════════════════════════════════════════════════════════════════════════════
+
+TICKER_DB: Dict[str, str] = {
+    # USA Large Cap
+    "Apple": "AAPL", "Microsoft": "MSFT", "Amazon": "AMZN", "Alphabet": "GOOGL",
+    "Google": "GOOGL", "Meta": "META", "Tesla": "TSLA", "Nvidia": "NVDA",
+    "Berkshire Hathaway": "BRK.B", "JPMorgan": "JPM", "Johnson & Johnson": "JNJ",
+    "Visa": "V", "Mastercard": "MA", "Procter & Gamble": "PG", "UnitedHealth": "UNH",
+    "Exxon Mobil": "XOM", "Home Depot": "HD", "Chevron": "CVX", "Abbvie": "ABBV",
+    "Eli Lilly": "LLY", "Costco": "COST", "PepsiCo": "PEP", "Coca Cola": "KO",
+    "Merck": "MRK", "Netflix": "NFLX", "Walt Disney": "DIS", "Salesforce": "CRM",
+    "Adobe": "ADBE", "Oracle": "ORCL", "Intel": "INTC", "AMD": "AMD",
+    "Qualcomm": "QCOM", "Texas Instruments": "TXN", "Broadcom": "AVGO",
+    "Goldman Sachs": "GS", "Morgan Stanley": "MS", "Bank of America": "BAC",
+    "Citigroup": "C", "Wells Fargo": "WFC", "American Express": "AXP",
+    "Boeing": "BA", "Caterpillar": "CAT", "Deere": "DE", "3M": "MMM",
+    "General Electric": "GE", "Honeywell": "HON", "Raytheon": "RTX",
+    "Lockheed Martin": "LMT", "Northrop Grumman": "NOC",
+    "Starbucks": "SBUX", "McDonald's": "MCD", "Nike": "NKE",
+    "Pfizer": "PFE", "Moderna": "MRNA", "Bristol-Myers": "BMY",
+    "Palo Alto Networks": "PANW", "CrowdStrike": "CRWD", "Fortinet": "FTNT",
+    "Airbnb": "ABNB", "Uber": "UBER", "Lyft": "LYFT", "Palantir": "PLTR",
+    "Snowflake": "SNOW", "Datadog": "DDOG", "Cloudflare": "NET",
+    "PayPal": "PYPL", "Block": "SQ", "Intuit": "INTU", "ServiceNow": "NOW",
+    "Workday": "WDAY", "Zoom": "ZM", "Spotify": "SPOT",
+    # Portafoglio originale
+    "Ross Stores": "ROST", "Church & Dwight": "CHD", "Tractor Supply": "TSCO",
+    "O'Reilly": "ORLY", "Sherwin-Williams": "SHW", "Ball Corporation": "BALL",
+    "Rollins": "ROL", "IDEX": "IEX", "AAON": "AAON", "Roper": "RMS",
+    "AutoZone": "AZO", "Amphenol": "APH", "Danaher": "DHR", "Mettler-Toledo": "MTD",
+    # ETF comuni
+    "S&P 500 ETF": "SPY", "Nasdaq ETF": "QQQ", "Total Market ETF": "VTI",
+    "World ETF": "VT", "Emerging Markets": "VWO", "Bond ETF": "BND",
+    "Gold ETF": "GLD", "Real Estate ETF": "VNQ", "Tech ETF": "FTEC",
+    # Indici
+    "S&P 500": "SPXTR", "Nasdaq 100": "NDX", "Dow Jones": "DJI",
+    "Russell 2000": "RUT", "VIX": "VIX",
+    # Europa
+    "LVMH": "LVMH", "ASML": "ASML", "SAP": "SAP", "Nestlé": "NESN",
+    "Novartis": "NVS", "Roche": "ROG", "Hermes": "RMS",
+}
+
+# Costruiamo indice di ricerca: ogni parola chiave → simbolo
+def _build_search_index(db: Dict[str, str]) -> Dict[str, str]:
+    index = {}
+    for name, symbol in db.items():
+        index[name.lower()] = symbol
+        index[symbol.lower()] = symbol
+        for word in name.lower().split():
+            if len(word) > 2:
+                index[word] = symbol
+    return index
+
+SEARCH_INDEX = _build_search_index(TICKER_DB)
+
+def search_ticker(query: str) -> List[Tuple[str, str]]:
+    """Cerca ticker per nome o simbolo. Restituisce lista di (nome, simbolo)."""
+    q = query.strip().lower()
+    if not q:
+        return []
+    results = {}
+    # Match esatto simbolo
+    for name, symbol in TICKER_DB.items():
+        if symbol.lower() == q or name.lower() == q:
+            results[symbol] = name
+    # Match parziale
+    for name, symbol in TICKER_DB.items():
+        if q in name.lower() or q in symbol.lower():
+            results[symbol] = name
+    return [(name, sym) for sym, name in results.items()][:8]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR — CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════════════════
+
+# Inizializza session state per la lista ticker
+if "portfolio_tickers" not in st.session_state:
+    st.session_state.portfolio_tickers = [
+        "ROST", "CHD", "TSCO", "ORLY", "SHW", "BALL",
+        "ROL", "IEX", "AAON", "AAPL", "RMS", "AZO", "APH", "DHR", "MTD"
+    ]
+if "custom_weights_manual" not in st.session_state:
+    st.session_state.custom_weights_manual = {}  # {ticker: peso manuale} — vuoto = equal weight
 
 with st.sidebar:
     st.markdown("## 📐 Markowitz\nPortfolio Optimizer")
@@ -284,26 +367,89 @@ with st.sidebar:
     st.markdown('<p class="section-title">Benchmark</p>', unsafe_allow_html=True)
     benchmark = st.text_input("Simbolo benchmark", value="SPXTR")
 
-    st.markdown('<p class="section-title">Ticker & Pesi</p>', unsafe_allow_html=True)
-    st.caption("Inserisci un ticker per riga nel formato: TICKER, peso (es. AAPL, 0.10)")
+    # ── RICERCA TICKER ────────────────────────────────────────────────────────
+    st.markdown('<p class="section-title">🔍 Cerca & Aggiungi Ticker</p>', unsafe_allow_html=True)
+    search_query = st.text_input(
+        "Cerca per nome o simbolo",
+        placeholder="es. Apple, MSFT, Nvidia, Gold ETF...",
+        key="ticker_search"
+    )
 
-    default_tickers = """ROST, 0.0667
-CHD, 0.0667
-TSCO, 0.0667
-ORLY, 0.0667
-SHW, 0.0667
-BALL, 0.0667
-ROL, 0.0667
-IEX, 0.0667
-AAON, 0.0667
-AAPL, 0.0667
-RMS, 0.0667
-AZO, 0.0667
-APH, 0.0667
-DHR, 0.0667
-MTD, 0.0667"""
+    if search_query:
+        results = search_ticker(search_query)
+        # Permette anche di aggiungere direttamente un simbolo custom
+        sym_upper = search_query.strip().upper()
+        if results:
+            for name, symbol in results:
+                col_a, col_b = st.columns([3, 1])
+                with col_a:
+                    st.caption(f"**{symbol}** — {name}")
+                with col_b:
+                    if st.button("➕", key=f"add_{symbol}"):
+                        if symbol not in st.session_state.portfolio_tickers:
+                            st.session_state.portfolio_tickers.append(symbol)
+                        st.rerun()
+        else:
+            # Simbolo non in database — aggiunta diretta
+            st.caption(f"Simbolo custom: **{sym_upper}**")
+            if st.button(f"➕ Aggiungi {sym_upper}"):
+                if sym_upper not in st.session_state.portfolio_tickers:
+                    st.session_state.portfolio_tickers.append(sym_upper)
+                st.rerun()
 
-    raw_input = st.text_area("Portfolio", value=default_tickers, height=320)
+    # ── LISTA TICKER CON PESI ─────────────────────────────────────────────────
+    st.markdown('<p class="section-title">📋 Portafoglio corrente</p>', unsafe_allow_html=True)
+
+    n = len(st.session_state.portfolio_tickers)
+    equal_w = round(1.0 / n, 6) if n > 0 else 1.0
+
+    tickers_to_remove = []
+    for ticker in list(st.session_state.portfolio_tickers):
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            st.markdown(f"<span style='font-family:DM Mono;font-size:13px;color:#e8eaf0'>{ticker}</span>",
+                        unsafe_allow_html=True)
+        with col2:
+            # Se peso manuale non impostato → mostra equal weight in grigio
+            current_w = st.session_state.custom_weights_manual.get(ticker, None)
+            new_w = st.number_input(
+                label="",
+                min_value=0.0, max_value=1.0,
+                value=float(current_w) if current_w is not None else equal_w,
+                step=0.01, format="%.4f",
+                key=f"w_{ticker}",
+                label_visibility="collapsed"
+            )
+            # Salva solo se diverso dall'equal weight (= personalizzato)
+            if abs(new_w - equal_w) > 1e-6:
+                st.session_state.custom_weights_manual[ticker] = new_w
+            else:
+                st.session_state.custom_weights_manual.pop(ticker, None)
+        with col3:
+            if st.button("🗑️", key=f"del_{ticker}"):
+                tickers_to_remove.append(ticker)
+
+    for t in tickers_to_remove:
+        st.session_state.portfolio_tickers.remove(t)
+        st.session_state.custom_weights_manual.pop(t, None)
+    if tickers_to_remove:
+        st.rerun()
+
+    # Mostra se i pesi sono equal weight o personalizzati
+    if not st.session_state.custom_weights_manual:
+        st.caption(f"⚖️ Equal weight automatico: {equal_w:.2%} per asset")
+    else:
+        total_manual = sum(st.session_state.custom_weights_manual.values())
+        color = "#34d399" if abs(total_manual - 1.0) < 0.01 else "#f87171"
+        st.markdown(
+            f"<span style='font-size:12px;color:{color}'>Σ pesi: {total_manual:.4f}"
+            f" {'✅' if abs(total_manual-1.0)<0.01 else '⚠️ (dovrebbe essere 1.0)'}</span>",
+            unsafe_allow_html=True
+        )
+
+    if st.button("🔄 Reset Equal Weight"):
+        st.session_state.custom_weights_manual = {}
+        st.rerun()
 
     st.markdown('<p class="section-title">Parametri simulazione</p>', unsafe_allow_html=True)
     num_portfolios = st.slider("Portafogli simulati", 1000, 20000, 10000, step=1000)
@@ -313,29 +459,17 @@ MTD, 0.0667"""
     run_btn = st.button("🚀  AVVIA ANALISI")
 
 
-# ── Parsing input ─────────────────────────────────────────────────────────────
-parsed_tickers: List[str] = []
-custom_weights_map: Dict[str, float] = {}
-parse_error = False
+# ── Costruzione lista ticker e pesi ──────────────────────────────────────────
+parsed_tickers: List[str] = list(st.session_state.portfolio_tickers)
+n_assets = len(parsed_tickers)
+equal_weight = 1.0 / n_assets if n_assets > 0 else 1.0
 
-for line in raw_input.strip().split("\n"):
-    line = line.strip()
-    if not line:
-        continue
-    parts = line.split(",")
-    if len(parts) != 2:
-        st.sidebar.error(f"❌ Formato non valido: '{line}' (usa TICKER, peso)")
-        parse_error = True
-        break
-    ticker = parts[0].strip().upper()
-    try:
-        weight = float(parts[1].strip())
-    except ValueError:
-        st.sidebar.error(f"❌ Peso non valido per {ticker}")
-        parse_error = True
-        break
-    parsed_tickers.append(ticker)
-    custom_weights_map[ticker] = weight
+# Se nessun peso manuale → equal weight per tutti
+custom_weights_map: Dict[str, float] = {}
+for ticker in parsed_tickers:
+    custom_weights_map[ticker] = st.session_state.custom_weights_manual.get(ticker, equal_weight)
+
+parse_error = n_assets == 0
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HEADER
