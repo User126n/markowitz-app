@@ -357,10 +357,12 @@ if "do_reset" not in st.session_state:
 
 # Applica reset se richiesto nel ciclo precedente
 if st.session_state.do_reset:
-    st.session_state.manual_weights = {}
-    # Cancella anche i widget number_input dal session state
+    n_t = len(st.session_state.portfolio_tickers)
+    eq  = round(1.0 / n_t, 6) if n_t > 0 else 1.0
+    st.session_state.manual_weights = {t: eq for t in st.session_state.portfolio_tickers}
+    # Forza aggiornamento dei widget number_input
     for t in st.session_state.portfolio_tickers:
-        st.session_state.pop(f"w_{t}", None)
+        st.session_state[f"w_{t}"] = eq
     st.session_state.do_reset = False
 
 
@@ -379,50 +381,38 @@ with st.sidebar:
     st.markdown('<p class="section-title">Benchmark</p>', unsafe_allow_html=True)
     benchmark = st.text_input("Simbolo benchmark", value="SPXTR")
 
-    # ── RICERCA TICKER ────────────────────────────────────────────────────────
+    # ── RICERCA TICKER — autocomplete live ──────────────────────────────────
     st.markdown('<p class="section-title">🔍 Cerca & Aggiungi Ticker</p>', unsafe_allow_html=True)
-    search_query = st.text_input(
-        "Cerca per nome o simbolo",
-        placeholder="es. Apple, ACN, Nvidia, SPY...",
-        key="ticker_search"
+
+    from streamlit_searchbox import st_searchbox
+
+    def _tv_search(query: str) -> list:
+        """Funzione di ricerca chiamata ad ogni carattere digitato."""
+        if not query or len(query.strip()) < 1:
+            return []
+        results = search_tv_live(query, limit=12)
+        # Restituisce lista di tuple (label_display, valore_da_salvare)
+        return [
+            (item["display"], item["tv_symbol"])
+            for item in results
+        ]
+
+    selected = st_searchbox(
+        _tv_search,
+        key       = "ticker_searchbox",
+        placeholder = "es. ENI, Apple, Bitcoin, Gold...",
+        label     = "Cerca strumento",
+        clear_on_submit = True,
+        debounce  = 300,   # ms di attesa prima di chiamare l'API
     )
 
-    if search_query and len(search_query.strip()) >= 1:
-        # Ricerca live su TradingView — nessun database locale
-        with st.spinner("🔍 Ricerca su TradingView..."):
-            live_results = search_tv_live(search_query, limit=12)
-
-        if live_results:
-            st.caption(f"{len(live_results)} risultati trovati:")
-            for item in live_results:
-                tv_sym  = item["tv_symbol"]   # es. MIL:ENI
-                display = item["display"]      # es. 📈 ENI (MIL) — Eni SpA
-                already = tv_sym in st.session_state.portfolio_tickers
-                col_a, col_b = st.columns([5, 1])
-                with col_a:
-                    color = "#6b7280" if already else "#e8eaf0"
-                    st.markdown(
-                        f"<span style='font-size:11px;font-family:DM Mono;color:{color}'>{display}</span>",
-                        unsafe_allow_html=True
-                    )
-                with col_b:
-                    if already:
-                        st.markdown("✅")
-                    else:
-                        if st.button("➕", key=f"add_{tv_sym}"):
-                            st.session_state.portfolio_tickers.append(tv_sym)
-                            st.rerun()
+    if selected:
+        tv_sym = selected  # valore restituito = tv_symbol (es. MIL:ENI)
+        if tv_sym not in st.session_state.portfolio_tickers:
+            st.session_state.portfolio_tickers.append(tv_sym)
+            st.rerun()
         else:
-            # API non raggiungibile o nessun risultato → aggiunta manuale
-            sym_upper = search_query.strip().upper()
-            st.warning("Nessun risultato live. Puoi aggiungere il simbolo manualmente:")
-            already = sym_upper in st.session_state.portfolio_tickers
-            if already:
-                st.success(f"✅ {sym_upper} già nel portafoglio")
-            else:
-                if st.button(f"➕ Aggiungi {sym_upper}"):
-                    st.session_state.portfolio_tickers.append(sym_upper)
-                    st.rerun()
+            st.caption(f"✅ {tv_sym} già nel portafoglio")
 
     # ── LISTA TICKER CON PESI ─────────────────────────────────────────────────
     st.markdown('<p class="section-title">📋 Portafoglio corrente</p>', unsafe_allow_html=True)
@@ -439,12 +429,12 @@ with st.sidebar:
                 unsafe_allow_html=True
             )
         with col2:
-            stored_w = st.session_state.manual_weights.get(ticker, equal_w)
+            stored_w = float(st.session_state.manual_weights.get(ticker, equal_w))
             new_w = st.number_input(
                 label="peso",
                 min_value=0.0, max_value=1.0,
-                value=float(stored_w),
-                step=0.01, format="%.4f",
+                value=round(stored_w, 6),
+                step=0.0001, format="%.4f",
                 key=f"w_{ticker}",
                 label_visibility="collapsed"
             )
