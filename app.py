@@ -270,11 +270,11 @@ def compute_rolling_optimal(port_ret: pd.DataFrame) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DATABASE TICKER — nome → simbolo TradingView
+# DATABASE TICKER — nome completo → simbolo
 # ══════════════════════════════════════════════════════════════════════════════
 
 TICKER_DB: Dict[str, str] = {
-    # USA Large Cap
+    # S&P 500 — tutti i principali
     "Apple": "AAPL", "Microsoft": "MSFT", "Amazon": "AMZN", "Alphabet": "GOOGL",
     "Google": "GOOGL", "Meta": "META", "Tesla": "TSLA", "Nvidia": "NVDA",
     "Berkshire Hathaway": "BRK.B", "JPMorgan": "JPM", "Johnson & Johnson": "JNJ",
@@ -290,71 +290,141 @@ TICKER_DB: Dict[str, str] = {
     "General Electric": "GE", "Honeywell": "HON", "Raytheon": "RTX",
     "Lockheed Martin": "LMT", "Northrop Grumman": "NOC",
     "Starbucks": "SBUX", "McDonald's": "MCD", "Nike": "NKE",
-    "Pfizer": "PFE", "Moderna": "MRNA", "Bristol-Myers": "BMY",
+    "Pfizer": "PFE", "Moderna": "MRNA", "Bristol-Myers Squibb": "BMY",
     "Palo Alto Networks": "PANW", "CrowdStrike": "CRWD", "Fortinet": "FTNT",
-    "Airbnb": "ABNB", "Uber": "UBER", "Lyft": "LYFT", "Palantir": "PLTR",
+    "Airbnb": "ABNB", "Uber": "UBER", "Palantir": "PLTR",
     "Snowflake": "SNOW", "Datadog": "DDOG", "Cloudflare": "NET",
     "PayPal": "PYPL", "Block": "SQ", "Intuit": "INTU", "ServiceNow": "NOW",
     "Workday": "WDAY", "Zoom": "ZM", "Spotify": "SPOT",
-    # Portafoglio originale
-    "Ross Stores": "ROST", "Church & Dwight": "CHD", "Tractor Supply": "TSCO",
-    "O'Reilly": "ORLY", "Sherwin-Williams": "SHW", "Ball Corporation": "BALL",
-    "Rollins": "ROL", "IDEX": "IEX", "AAON": "AAON", "Roper": "RMS",
-    "AutoZone": "AZO", "Amphenol": "APH", "Danaher": "DHR", "Mettler-Toledo": "MTD",
-    # ETF comuni
-    "S&P 500 ETF": "SPY", "Nasdaq ETF": "QQQ", "Total Market ETF": "VTI",
-    "World ETF": "VT", "Emerging Markets": "VWO", "Bond ETF": "BND",
-    "Gold ETF": "GLD", "Real Estate ETF": "VNQ", "Tech ETF": "FTEC",
+    "Accenture": "ACN", "Automatic Data Processing": "ADP",
+    "Fiserv": "FI", "Fidelity National": "FIS", "Global Payments": "GPN",
+    "Moody's": "MCO", "S&P Global": "SPGI", "Intercontinental Exchange": "ICE",
+    "CME Group": "CME", "Nasdaq Inc": "NDAQ",
+    "Abbott Laboratories": "ABT", "Medtronic": "MDT", "Stryker": "SYK",
+    "Boston Scientific": "BSX", "Zimmer Biomet": "ZBH", "Becton Dickinson": "BDX",
+    "Thermo Fisher": "TMO", "Agilent": "A", "Waters": "WAT",
+    "Waste Management": "WM", "Republic Services": "RSG",
+    "American Tower": "AMT", "Crown Castle": "CCI", "Prologis": "PLD",
+    "Simon Property": "SPG", "Realty Income": "O",
+    "NextEra Energy": "NEE", "Duke Energy": "DUK", "Southern Company": "SO",
+    "Dominion Energy": "D", "Exelon": "EXC", "Sempra": "SRE",
+    "ConocoPhillips": "COP", "Pioneer Natural Resources": "PXD",
+    "Schlumberger": "SLB", "Halliburton": "HAL", "Baker Hughes": "BKR",
+    "Colgate-Palmolive": "CL", "Kimberly-Clark": "KMB", "Clorox": "CLX",
+    "Estee Lauder": "EL", "Church & Dwight": "CHD",
+    "Ross Stores": "ROST", "TJX Companies": "TJX", "Burlington": "BURL",
+    "Tractor Supply": "TSCO", "O'Reilly Automotive": "ORLY",
+    "Sherwin-Williams": "SHW", "Ball Corporation": "BALL",
+    "Rollins": "ROL", "IDEX Corporation": "IEX",
+    "AAON Inc": "AAON", "AutoZone": "AZO", "Amphenol": "APH",
+    "Danaher": "DHR", "Mettler-Toledo": "MTD",
+    "Roper Technologies": "ROP", "Parker Hannifin": "PH",
+    "Illinois Tool Works": "ITW", "Emerson Electric": "EMR",
+    "Rockwell Automation": "ROK", "Fortive": "FTV",
+    "Verisk Analytics": "VRSK", "Fair Isaac": "FICO", "Gartner": "IT",
+    "Costar Group": "CSGP", "Zillow": "Z",
+    "Charter Communications": "CHTR", "Comcast": "CMCSA",
+    "T-Mobile": "TMUS", "Verizon": "VZ", "AT&T": "T",
+    "Motorola Solutions": "MSI", "Keysight": "KEYS",
+    "Analog Devices": "ADI", "Microchip Technology": "MCHP",
+    "KLA Corporation": "KLAC", "Lam Research": "LRCX",
+    "Applied Materials": "AMAT", "ASML Holding": "ASML",
+    "Marvell Technology": "MRVL", "Micron": "MU", "Western Digital": "WDC",
+    "Seagate": "STX", "Corning": "GLW",
+    "FedEx": "FDX", "UPS": "UPS", "Norfolk Southern": "NSC",
+    "Union Pacific": "UNP", "CSX": "CSX",
+    "American Airlines": "AAL", "Delta": "DAL", "Southwest": "LUV",
+    "United Airlines": "UAL", "Carnival": "CCL", "Royal Caribbean": "RCL",
+    "Marriott": "MAR", "Hilton": "HLT", "Wyndham": "WH",
+    "Las Vegas Sands": "LVS", "MGM Resorts": "MGM", "Wynn": "WYNN",
+    "Chipotle": "CMG", "Yum Brands": "YUM", "Darden": "DRI",
+    "Dollar General": "DG", "Dollar Tree": "DLTR", "Target": "TGT",
+    "Walmart": "WMT", "Kroger": "KR", "Sysco": "SYY",
+    "CVS Health": "CVS", "Walgreens": "WBA", "Cardinal Health": "CAH",
+    "McKesson": "MCK", "AmerisourceBergen": "ABC",
+    "Cigna": "CI", "Humana": "HUM", "Centene": "CNC",
+    "Regeneron": "REGN", "Biogen": "BIIB", "Vertex": "VRTX",
+    "Gilead": "GILD", "Amgen": "AMGN", "Celanese": "CE",
+    "Dow Chemical": "DOW", "DuPont": "DD", "LyondellBasell": "LYB",
+    "Air Products": "APD", "Linde": "LIN", "PPG Industries": "PPG",
+    "Freeport-McMoRan": "FCX", "Newmont": "NEM", "Nucor": "NUE",
+    # ETF
+    "S&P 500 ETF SPY": "SPY", "Nasdaq ETF QQQ": "QQQ",
+    "Total Market VTI": "VTI", "World ETF VT": "VT",
+    "Emerging Markets VWO": "VWO", "Bond ETF BND": "BND",
+    "Gold ETF GLD": "GLD", "Silver ETF SLV": "SLV",
+    "Real Estate ETF VNQ": "VNQ", "Tech ETF FTEC": "FTEC",
+    "Dividend ETF VYM": "VYM", "Growth ETF VUG": "VUG",
+    "Value ETF VTV": "VTV", "Small Cap ETF VB": "VB",
+    "Europe ETF VGK": "VGK", "Asia ETF VPL": "VPL",
     # Indici
-    "S&P 500": "SPXTR", "Nasdaq 100": "NDX", "Dow Jones": "DJI",
-    "Russell 2000": "RUT", "VIX": "VIX",
+    "S&P 500 Total Return": "SPXTR", "Nasdaq 100": "NDX",
+    "Dow Jones": "DJI", "Russell 2000": "RUT", "VIX": "VIX",
     # Europa
-    "LVMH": "LVMH", "ASML": "ASML", "SAP": "SAP", "Nestlé": "NESN",
+    "LVMH": "LVMH", "SAP": "SAP", "Nestlé": "NESN",
     "Novartis": "NVS", "Roche": "ROG", "Hermes": "RMS",
+    "Volkswagen": "VOW3", "BMW": "BMW", "Mercedes": "MBG",
+    "Siemens": "SIE", "Allianz": "ALV", "Airbus": "AIR",
+    "Total Energies": "TTE", "BNP Paribas": "BNP",
+    "Unilever": "UL", "AstraZeneca": "AZN", "GlaxoSmithKline": "GSK",
+    "BP": "BP", "Shell": "SHEL", "Rio Tinto": "RIO",
 }
 
-# Costruiamo indice di ricerca: ogni parola chiave → simbolo
-def _build_search_index(db: Dict[str, str]) -> Dict[str, str]:
-    index = {}
-    for name, symbol in db.items():
-        index[name.lower()] = symbol
-        index[symbol.lower()] = symbol
-        for word in name.lower().split():
-            if len(word) > 2:
-                index[word] = symbol
-    return index
-
-SEARCH_INDEX = _build_search_index(TICKER_DB)
-
 def search_ticker(query: str) -> List[Tuple[str, str]]:
-    """Cerca ticker per nome o simbolo. Restituisce lista di (nome, simbolo)."""
+    """
+    Cerca ticker per nome o simbolo nel database.
+    Restituisce lista di (nome_display, simbolo).
+    Se non trovato nel DB, restituisce lista vuota
+    (il simbolo viene comunque aggiunto come custom).
+    """
     q = query.strip().lower()
-    if not q:
+    if not q or len(q) < 1:
         return []
-    results = {}
-    # Match esatto simbolo
+
+    results: Dict[str, str] = {}  # symbol → display_name
+
     for name, symbol in TICKER_DB.items():
+        # Match esatto simbolo o nome
         if symbol.lower() == q or name.lower() == q:
-            results[symbol] = name
-    # Match parziale
-    for name, symbol in TICKER_DB.items():
-        if q in name.lower() or q in symbol.lower():
-            results[symbol] = name
-    return [(name, sym) for sym, name in results.items()][:8]
+            results[symbol] = f"{symbol} — {name}"
+        # Match parziale su simbolo o nome
+        elif q in symbol.lower() or q in name.lower():
+            results[symbol] = f"{symbol} — {name}"
+
+    # Ordina: prima i match esatti sul simbolo
+    sorted_results = sorted(
+        results.items(),
+        key=lambda x: (0 if x[0].lower().startswith(q) else 1)
+    )
+    return [(display, sym) for sym, display in sorted_results[:8]]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SIDEBAR — CONFIGURAZIONE
+# SESSION STATE — inizializzazione
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Inizializza session state per la lista ticker
 if "portfolio_tickers" not in st.session_state:
     st.session_state.portfolio_tickers = [
         "ROST", "CHD", "TSCO", "ORLY", "SHW", "BALL",
         "ROL", "IEX", "AAON", "AAPL", "RMS", "AZO", "APH", "DHR", "MTD"
     ]
-if "custom_weights_manual" not in st.session_state:
-    st.session_state.custom_weights_manual = {}  # {ticker: peso manuale} — vuoto = equal weight
+if "manual_weights" not in st.session_state:
+    st.session_state.manual_weights = {}   # {ticker: float} — vuoto = equal weight
+if "do_reset" not in st.session_state:
+    st.session_state.do_reset = False
+
+# Applica reset se richiesto nel ciclo precedente
+if st.session_state.do_reset:
+    st.session_state.manual_weights = {}
+    # Cancella anche i widget number_input dal session state
+    for t in st.session_state.portfolio_tickers:
+        st.session_state.pop(f"w_{t}", None)
+    st.session_state.do_reset = False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SIDEBAR — CONFIGURAZIONE
+# ══════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
     st.markdown("## 📐 Markowitz\nPortfolio Optimizer")
@@ -371,84 +441,105 @@ with st.sidebar:
     st.markdown('<p class="section-title">🔍 Cerca & Aggiungi Ticker</p>', unsafe_allow_html=True)
     search_query = st.text_input(
         "Cerca per nome o simbolo",
-        placeholder="es. Apple, MSFT, Nvidia, Gold ETF...",
+        placeholder="es. Apple, ACN, Nvidia, SPY...",
         key="ticker_search"
     )
 
-    if search_query:
-        results = search_ticker(search_query)
-        # Permette anche di aggiungere direttamente un simbolo custom
+    if search_query and len(search_query.strip()) >= 1:
         sym_upper = search_query.strip().upper()
+        results   = search_ticker(search_query)
+
         if results:
-            for name, symbol in results:
-                col_a, col_b = st.columns([3, 1])
+            # Mostra i risultati trovati nel DB
+            for display, symbol in results:
+                already = symbol in st.session_state.portfolio_tickers
+                col_a, col_b = st.columns([4, 1])
                 with col_a:
-                    st.caption(f"**{symbol}** — {name}")
+                    color = "#6b7280" if already else "#e8eaf0"
+                    st.markdown(
+                        f"<span style='font-size:12px;font-family:DM Mono;color:{color}'>{display}</span>",
+                        unsafe_allow_html=True
+                    )
                 with col_b:
-                    if st.button("➕", key=f"add_{symbol}"):
-                        if symbol not in st.session_state.portfolio_tickers:
+                    if already:
+                        st.markdown("✅", unsafe_allow_html=True)
+                    else:
+                        if st.button("➕", key=f"add_{symbol}"):
                             st.session_state.portfolio_tickers.append(symbol)
-                        st.rerun()
+                            st.rerun()
         else:
-            # Simbolo non in database — aggiunta diretta
-            st.caption(f"Simbolo custom: **{sym_upper}**")
-            if st.button(f"➕ Aggiungi {sym_upper}"):
-                if sym_upper not in st.session_state.portfolio_tickers:
+            # Non trovato nel DB → aggiunta come simbolo custom diretto
+            already = sym_upper in st.session_state.portfolio_tickers
+            if already:
+                st.success(f"✅ {sym_upper} già nel portafoglio")
+            else:
+                st.info(f"Simbolo **{sym_upper}** non trovato nel database.\nVerrà aggiunto come simbolo custom (TradingView verificherà la disponibilità dei dati).")
+                if st.button(f"➕ Aggiungi {sym_upper} come custom"):
                     st.session_state.portfolio_tickers.append(sym_upper)
-                st.rerun()
+                    st.rerun()
 
     # ── LISTA TICKER CON PESI ─────────────────────────────────────────────────
     st.markdown('<p class="section-title">📋 Portafoglio corrente</p>', unsafe_allow_html=True)
 
-    n = len(st.session_state.portfolio_tickers)
-    equal_w = round(1.0 / n, 6) if n > 0 else 1.0
+    n_tickers = len(st.session_state.portfolio_tickers)
+    equal_w   = round(1.0 / n_tickers, 6) if n_tickers > 0 else 1.0
 
     tickers_to_remove = []
     for ticker in list(st.session_state.portfolio_tickers):
         col1, col2, col3 = st.columns([2, 2, 1])
         with col1:
-            st.markdown(f"<span style='font-family:DM Mono;font-size:13px;color:#e8eaf0'>{ticker}</span>",
-                        unsafe_allow_html=True)
+            st.markdown(
+                f"<span style='font-family:DM Mono;font-size:12px;color:#e8eaf0'>{ticker}</span>",
+                unsafe_allow_html=True
+            )
         with col2:
-            # Se peso manuale non impostato → mostra equal weight in grigio
-            current_w = st.session_state.custom_weights_manual.get(ticker, None)
+            stored_w = st.session_state.manual_weights.get(ticker, equal_w)
             new_w = st.number_input(
-                label="",
+                label="peso",
                 min_value=0.0, max_value=1.0,
-                value=float(current_w) if current_w is not None else equal_w,
+                value=float(stored_w),
                 step=0.01, format="%.4f",
                 key=f"w_{ticker}",
                 label_visibility="collapsed"
             )
-            # Salva solo se diverso dall'equal weight (= personalizzato)
-            if abs(new_w - equal_w) > 1e-6:
-                st.session_state.custom_weights_manual[ticker] = new_w
-            else:
-                st.session_state.custom_weights_manual.pop(ticker, None)
+            # Registra sempre il valore corrente
+            st.session_state.manual_weights[ticker] = new_w
         with col3:
             if st.button("🗑️", key=f"del_{ticker}"):
                 tickers_to_remove.append(ticker)
 
     for t in tickers_to_remove:
         st.session_state.portfolio_tickers.remove(t)
-        st.session_state.custom_weights_manual.pop(t, None)
+        st.session_state.manual_weights.pop(t, None)
+        st.session_state.pop(f"w_{t}", None)
     if tickers_to_remove:
         st.rerun()
 
-    # Mostra se i pesi sono equal weight o personalizzati
-    if not st.session_state.custom_weights_manual:
-        st.caption(f"⚖️ Equal weight automatico: {equal_w:.2%} per asset")
-    else:
-        total_manual = sum(st.session_state.custom_weights_manual.values())
-        color = "#34d399" if abs(total_manual - 1.0) < 0.01 else "#f87171"
-        st.markdown(
-            f"<span style='font-size:12px;color:{color}'>Σ pesi: {total_manual:.4f}"
-            f" {'✅' if abs(total_manual-1.0)<0.01 else '⚠️ (dovrebbe essere 1.0)'}</span>",
-            unsafe_allow_html=True
+    # Stato pesi
+    if n_tickers > 0:
+        total_w = sum(
+            st.session_state.manual_weights.get(t, equal_w)
+            for t in st.session_state.portfolio_tickers
         )
+        is_equal = all(
+            abs(st.session_state.manual_weights.get(t, equal_w) - equal_w) < 1e-4
+            for t in st.session_state.portfolio_tickers
+        )
+        if is_equal:
+            st.caption(f"⚖️ Equal weight: {equal_w:.2%} per asset")
+        else:
+            color = "#34d399" if abs(total_w - 1.0) < 0.015 else "#f87171"
+            icon  = "✅" if abs(total_w - 1.0) < 0.015 else "⚠️"
+            st.markdown(
+                f"<span style='font-size:12px;color:{color}'>Σ pesi: {total_w:.4f} {icon}</span>",
+                unsafe_allow_html=True
+            )
+            if abs(total_w - 1.0) > 0.015:
+                st.caption("I pesi verranno normalizzati automaticamente a 1.0")
 
+    # Bottone reset — usa flag per evitare conflitti con number_input
     if st.button("🔄 Reset Equal Weight"):
-        st.session_state.custom_weights_manual = {}
+        st.session_state.do_reset = True
         st.rerun()
 
     st.markdown('<p class="section-title">Parametri simulazione</p>', unsafe_allow_html=True)
@@ -459,15 +550,24 @@ with st.sidebar:
     run_btn = st.button("🚀  AVVIA ANALISI")
 
 
-# ── Costruzione lista ticker e pesi ──────────────────────────────────────────
+# ── Costruzione lista ticker e pesi finali ───────────────────────────────────
 parsed_tickers: List[str] = list(st.session_state.portfolio_tickers)
 n_assets = len(parsed_tickers)
 equal_weight = 1.0 / n_assets if n_assets > 0 else 1.0
 
-# Se nessun peso manuale → equal weight per tutti
-custom_weights_map: Dict[str, float] = {}
-for ticker in parsed_tickers:
-    custom_weights_map[ticker] = st.session_state.custom_weights_manual.get(ticker, equal_weight)
+# Recupera pesi (equal weight se non impostati manualmente)
+raw_weights = np.array([
+    st.session_state.manual_weights.get(t, equal_weight)
+    for t in parsed_tickers
+])
+# Normalizza sempre a 1.0
+total_raw = raw_weights.sum()
+if total_raw > 1e-8:
+    raw_weights = raw_weights / total_raw
+
+custom_weights_map: Dict[str, float] = {
+    t: float(raw_weights[i]) for i, t in enumerate(parsed_tickers)
+}
 
 parse_error = n_assets == 0
 
