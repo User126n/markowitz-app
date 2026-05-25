@@ -1,15 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-app.py — Streamlit Web App: Frontiera Efficiente di Markowitz
-=============================================================
-Come avviare:
-    pip install streamlit tvdatafeed numpy pandas plotly seaborn matplotlib
-    streamlit run app.py
-
-Come pubblicare gratis:
-    1. Crea account su https://streamlit.io
-    2. Carica questo file su GitHub
-    3. Collega il repo su share.streamlit.io → Deploy
+app.py — Markowitz Portfolio Optimizer con Login Supabase
 """
 
 import streamlit as st
@@ -21,10 +12,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.dates as mdates
 from typing import Dict, List, Optional, Tuple
-import logging
-import io
+import logging, io, json, requests, re as _re
+from supabase import create_client, Client
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Markowitz Portfolio Optimizer",
     page_icon="📈",
@@ -113,8 +104,115 @@ div[data-testid="stExpander"] {
 """, unsafe_allow_html=True)
 
 
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# LOGICA DI CALCOLO (backend puro, nessuna dipendenza da Streamlit)
+# SUPABASE — connessione
+# ══════════════════════════════════════════════════════════════════════════════
+
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+
+@st.cache_resource
+def get_supabase() -> Client:
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase = get_supabase()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTH — login / registrazione / logout
+# ══════════════════════════════════════════════════════════════════════════════
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
+
+def do_login(email: str, password: str):
+    try:
+        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        st.session_state.user         = res.user
+        st.session_state.access_token = res.session.access_token
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+def do_register(email: str, password: str):
+    try:
+        res = supabase.auth.sign_up({"email": email, "password": password})
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+def do_logout():
+    supabase.auth.sign_out()
+    st.session_state.user         = None
+    st.session_state.access_token = None
+    st.session_state.current_portfolio_id   = None
+    st.session_state.portfolio_tickers      = DEFAULT_TICKERS.copy()
+    st.session_state.manual_weights         = {}
+    st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DB — portafogli Supabase
+# ══════════════════════════════════════════════════════════════════════════════
+
+def db_client():
+    """Restituisce il client Supabase autenticato con il token dell'utente."""
+    if st.session_state.access_token:
+        supabase.auth.set_session(
+            st.session_state.access_token,
+            st.session_state.access_token
+        )
+    return supabase
+
+def load_portfolios() -> List[Dict]:
+    """Carica tutti i portafogli dell'utente corrente."""
+    try:
+        res = db_client().table("portfolios").select("*").order("created_at").execute()
+        return res.data or []
+    except Exception:
+        return []
+
+def load_portfolio_assets(portfolio_id: str) -> Tuple[List[str], Dict[str, float], str]:
+    """Carica ticker, pesi e benchmark di un portafoglio."""
+    try:
+        p = db_client().table("portfolios").select("benchmark").eq("id", portfolio_id).single().execute()
+        benchmark = p.data.get("benchmark", "SPXTR") if p.data else "SPXTR"
+        a = db_client().table("portfolio_assets").select("*").eq("portfolio_id", portfolio_id).execute()
+        assets = a.data or []
+        tickers = [x["ticker"] for x in assets]
+        weights = {x["ticker"]: x["weight"] for x in assets}
+        return tickers, weights, benchmark
+    except Exception:
+        return [], {}, "SPXTR"
+
+def save_portfolio(name: str, tickers: List[str], weights: Dict[str, float],
+                   benchmark: str, portfolio_id: Optional[str] = None) -> str:
+    """Salva o aggiorna un portafoglio. Restituisce l'ID."""
+    uid = st.session_state.user.id
+    if portfolio_id:
+        db_client().table("portfolios").update({
+            "name": name, "benchmark": benchmark, "updated_at": "now()"
+        }).eq("id", portfolio_id).execute()
+        db_client().table("portfolio_assets").delete().eq("portfolio_id", portfolio_id).execute()
+    else:
+        res = db_client().table("portfolios").insert({
+            "user_id": uid, "name": name, "benchmark": benchmark
+        }).execute()
+        portfolio_id = res.data[0]["id"]
+
+    assets = [{"portfolio_id": portfolio_id, "ticker": t, "weight": weights.get(t, 0.0)}
+              for t in tickers]
+    if assets:
+        db_client().table("portfolio_assets").insert(assets).execute()
+    return portfolio_id
+
+def delete_portfolio(portfolio_id: str):
+    db_client().table("portfolios").delete().eq("id", portfolio_id).execute()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LOGICA DI CALCOLO
 # ══════════════════════════════════════════════════════════════════════════════
 
 PERIODS_PER_YEAR = 252
@@ -345,15 +443,79 @@ def search_tv_live(query: str, limit: int = 12) -> List[Dict]:
 # SESSION STATE — inizializzazione
 # ══════════════════════════════════════════════════════════════════════════════
 
+import json
+import streamlit.components.v1 as _components
+
+# ── PERSISTENZA PORTAFOGLIO su localStorage del browser ──────────────────────
+
+DEFAULT_TICKERS = ["ROST", "CHD", "TSCO", "ORLY", "SHW", "BALL",
+                   "ROL", "IEX", "AAON", "AAPL", "RMS", "AZO", "APH", "DHR", "MTD"]
+
 if "portfolio_tickers" not in st.session_state:
-    st.session_state.portfolio_tickers = [
-        "ROST", "CHD", "TSCO", "ORLY", "SHW", "BALL",
-        "ROL", "IEX", "AAON", "AAPL", "RMS", "AZO", "APH", "DHR", "MTD"
-    ]
+    st.session_state.portfolio_tickers = DEFAULT_TICKERS.copy()
 if "manual_weights" not in st.session_state:
-    st.session_state.manual_weights = {}   # {ticker: float} — vuoto = equal weight
+    st.session_state.manual_weights = {}
 if "do_reset" not in st.session_state:
     st.session_state.do_reset = False
+if "ls_loaded" not in st.session_state:
+    st.session_state.ls_loaded = False
+
+# Componente HTML che legge localStorage e lo inietta in un campo hidden
+# Al primo caricamento della pagina, invia i dati salvati a Streamlit
+_LS_KEY_TICKERS = "mkw_tickers"
+_LS_KEY_WEIGHTS = "mkw_weights"
+
+_load_script = f"""
+<script>
+(function() {{
+    const tickers = localStorage.getItem("{_LS_KEY_TICKERS}");
+    const weights = localStorage.getItem("{_LS_KEY_WEIGHTS}");
+    // Invia i dati al server Streamlit tramite query param al primo load
+    if (tickers && !sessionStorage.getItem("mkw_sent")) {{
+        sessionStorage.setItem("mkw_sent", "1");
+        const url = new URL(window.location.href);
+        url.searchParams.set("mkw_t", tickers);
+        url.searchParams.set("mkw_w", weights || "{{}}");
+        window.history.replaceState(null, "", url.toString());
+        window.location.reload();
+    }}
+}})();
+</script>
+"""
+
+# Al primo caricamento, legge i query params iniettati dallo script
+if not st.session_state.ls_loaded:
+    params = st.query_params
+    if "mkw_t" in params:
+        try:
+            loaded_t = json.loads(params["mkw_t"])
+            loaded_w = json.loads(params.get("mkw_w", "{}"))
+            if isinstance(loaded_t, list) and len(loaded_t) > 0:
+                st.session_state.portfolio_tickers = loaded_t
+                st.session_state.manual_weights    = loaded_w
+            # Pulisce i query params dall'URL
+            st.query_params.clear()
+        except Exception:
+            pass
+    st.session_state.ls_loaded = True
+
+# Inietta lo script di lettura solo al primo load (prima della sidebar)
+if not st.session_state.get("ls_script_done"):
+    _components.html(_load_script, height=0)
+    st.session_state.ls_script_done = True
+
+
+def _save_to_localstorage(tickers: list, weights: dict):
+    """Salva portafoglio e pesi nel localStorage del browser."""
+    t_json = json.dumps(tickers)
+    w_json = json.dumps(weights)
+    save_script = f"""
+<script>
+localStorage.setItem("{_LS_KEY_TICKERS}", {repr(t_json)});
+localStorage.setItem("{_LS_KEY_WEIGHTS}", {repr(w_json)});
+</script>
+"""
+    _components.html(save_script, height=0)
 
 # Applica reset se richiesto nel ciclo precedente
 if st.session_state.do_reset:
@@ -405,9 +567,13 @@ with st.sidebar:
     )
 
     if selected:
-        tv_sym = selected  # valore restituito = tv_symbol (es. MIL:ENI)
+        tv_sym = selected
         if tv_sym not in st.session_state.portfolio_tickers:
             st.session_state.portfolio_tickers.append(tv_sym)
+            _save_to_localstorage(
+                st.session_state.portfolio_tickers,
+                st.session_state.manual_weights
+            )
             st.rerun()
         else:
             st.caption(f"✅ {tv_sym} già nel portafoglio")
@@ -418,7 +584,6 @@ with st.sidebar:
     n_tickers = len(st.session_state.portfolio_tickers)
     equal_w   = round(1.0 / n_tickers, 6) if n_tickers > 0 else 1.0
 
-    tickers_to_remove = []
     for ticker in list(st.session_state.portfolio_tickers):
         col1, col2, col3 = st.columns([2, 2, 1])
         with col1:
@@ -427,8 +592,6 @@ with st.sidebar:
                 unsafe_allow_html=True
             )
         with col2:
-            # Usa il valore nel session_state del widget se esiste,
-            # altrimenti equal_w. Non scrivere mai manualmente su "w_{ticker}".
             widget_key = f"w_{ticker}"
             if widget_key not in st.session_state:
                 st.session_state[widget_key] = round(equal_w, 6)
@@ -443,14 +606,20 @@ with st.sidebar:
             st.session_state.manual_weights[ticker] = new_w
         with col3:
             if st.button("🗑️", key=f"del_{ticker}"):
-                tickers_to_remove.append(ticker)
+                st.session_state.portfolio_tickers.remove(ticker)
+                st.session_state.manual_weights.pop(ticker, None)
+                st.session_state.pop(f"w_{ticker}", None)
+                _save_to_localstorage(
+                    st.session_state.portfolio_tickers,
+                    st.session_state.manual_weights
+                )
+                st.rerun()
 
-    for t in tickers_to_remove:
-        st.session_state.portfolio_tickers.remove(t)
-        st.session_state.manual_weights.pop(t, None)
-        st.session_state.pop(f"w_{t}", None)
-    if tickers_to_remove:
-        st.rerun()
+    # Salva automaticamente i pesi correnti ad ogni interazione
+    _save_to_localstorage(
+        st.session_state.portfolio_tickers,
+        st.session_state.manual_weights
+    )
 
     # Stato pesi
     if n_tickers > 0:
@@ -477,11 +646,10 @@ with st.sidebar:
     # Reset Equal Weight — cancella i widget e svuota manual_weights
     if st.button("🔄 Reset Equal Weight"):
         st.session_state.manual_weights = {}
-        # Cancella le chiavi dei widget così al prossimo render
-        # vengono ricreati con equal_w come valore di default
         for t in list(st.session_state.portfolio_tickers):
             st.session_state.pop(f"w_{t}", None)
         st.session_state.do_reset = False
+        _save_to_localstorage(st.session_state.portfolio_tickers, {})
         st.rerun()
 
     st.markdown('<p class="section-title">Parametri simulazione</p>', unsafe_allow_html=True)
@@ -579,6 +747,321 @@ st.success("✅ Analisi completata!")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB LAYOUT
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SESSION STATE — init
+# ══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_TICKERS = ["ROST","CHD","TSCO","ORLY","SHW","BALL",
+                   "ROL","IEX","AAON","AAPL","RMS","AZO","APH","DHR","MTD"]
+
+for key, default in [
+    ("portfolio_tickers", DEFAULT_TICKERS.copy()),
+    ("manual_weights",    {}),
+    ("do_reset",          False),
+    ("current_portfolio_id", None),
+    ("current_portfolio_name", "Nuovo portafoglio"),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGINA LOGIN — mostrata se utente non loggato
+# ══════════════════════════════════════════════════════════════════════════════
+
+if not st.session_state.user:
+    st.markdown("""
+    <div style="max-width:420px;margin:80px auto 0 auto;">
+    <h1 style="font-family:DM Mono;font-size:1.8rem;margin-bottom:4px;">📈 Markowitz</h1>
+    <p style="color:#6b7280;margin-bottom:32px;">Portfolio Optimizer · Accedi o registrati</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_center = st.columns([1,2,1])[1]
+    with col_center:
+        tab_login, tab_reg = st.tabs(["🔑 Accedi", "📝 Registrati"])
+
+        with tab_login:
+            email_l    = st.text_input("Email", key="login_email")
+            password_l = st.text_input("Password", type="password", key="login_pass")
+            if st.button("Accedi", key="btn_login"):
+                if email_l and password_l:
+                    ok, err = do_login(email_l, password_l)
+                    if ok:
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {err}")
+                else:
+                    st.warning("Inserisci email e password")
+
+        with tab_reg:
+            email_r    = st.text_input("Email", key="reg_email")
+            password_r = st.text_input("Password (min 6 caratteri)", type="password", key="reg_pass")
+            if st.button("Registrati", key="btn_reg"):
+                if email_r and password_r:
+                    ok, err = do_register(email_r, password_r)
+                    if ok:
+                        st.success("✅ Registrazione completata! Controlla la tua email per confermare, poi accedi.")
+                    else:
+                        st.error(f"❌ {err}")
+                else:
+                    st.warning("Inserisci email e password")
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# APP PRINCIPALE — solo per utenti loggati
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Reset pesi
+if st.session_state.do_reset:
+    n_t = len(st.session_state.portfolio_tickers)
+    eq  = round(1.0 / n_t, 6) if n_t > 0 else 1.0
+    st.session_state.manual_weights = {}
+    for t in st.session_state.portfolio_tickers:
+        st.session_state.pop(f"w_{t}", None)
+    st.session_state.do_reset = False
+
+# ── SIDEBAR ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    # Header utente
+    user_email = st.session_state.user.email
+    st.markdown(f"## 📐 Markowitz")
+    st.caption(f"👤 {user_email}")
+    if st.button("🚪 Logout"):
+        do_logout()
+    st.markdown("---")
+
+    # ── GESTIONE PORTAFOGLI SALVATI ───────────────────────────────────────────
+    st.markdown('<p class="section-title">💾 I tuoi portafogli</p>', unsafe_allow_html=True)
+    portfolios = load_portfolios()
+
+    if portfolios:
+        port_names = {p["name"]: p["id"] for p in portfolios}
+        selected_name = st.selectbox("Carica portafoglio", ["— Nuovo —"] + list(port_names.keys()),
+                                     key="sel_portfolio")
+        col_load, col_del = st.columns([3,1])
+        with col_load:
+            if st.button("📂 Carica", key="btn_load") and selected_name != "— Nuovo —":
+                pid = port_names[selected_name]
+                tickers, weights, bench = load_portfolio_assets(pid)
+                if tickers:
+                    # Reset widget keys prima di cambiare portafoglio
+                    for t in st.session_state.portfolio_tickers:
+                        st.session_state.pop(f"w_{t}", None)
+                    st.session_state.portfolio_tickers      = tickers
+                    st.session_state.manual_weights         = weights
+                    st.session_state.current_portfolio_id   = pid
+                    st.session_state.current_portfolio_name = selected_name
+                    st.rerun()
+        with col_del:
+            if st.button("🗑️", key="btn_del_port") and selected_name != "— Nuovo —":
+                delete_portfolio(port_names[selected_name])
+                if st.session_state.current_portfolio_id == port_names[selected_name]:
+                    st.session_state.current_portfolio_id   = None
+                    st.session_state.portfolio_tickers      = DEFAULT_TICKERS.copy()
+                    st.session_state.manual_weights         = {}
+                st.rerun()
+    else:
+        st.caption("Nessun portafoglio salvato")
+
+    # Salva portafoglio corrente
+    st.markdown('<p class="section-title">💾 Salva portafoglio</p>', unsafe_allow_html=True)
+    port_name_input = st.text_input("Nome portafoglio",
+                                    value=st.session_state.current_portfolio_name,
+                                    key="port_name_input")
+    if st.button("💾 Salva", key="btn_save"):
+        if port_name_input.strip():
+            pid = save_portfolio(
+                name         = port_name_input.strip(),
+                tickers      = st.session_state.portfolio_tickers,
+                weights      = st.session_state.manual_weights,
+                benchmark    = st.session_state.get("benchmark_val", "SPXTR"),
+                portfolio_id = st.session_state.current_portfolio_id,
+            )
+            st.session_state.current_portfolio_id   = pid
+            st.session_state.current_portfolio_name = port_name_input.strip()
+            st.success("✅ Salvato!")
+        else:
+            st.warning("Inserisci un nome")
+
+    st.markdown("---")
+
+    # ── CREDENZIALI TV ────────────────────────────────────────────────────────
+    st.markdown('<p class="section-title">Credenziali TradingView</p>', unsafe_allow_html=True)
+    tv_user = st.text_input("Username (opzionale)", placeholder="accesso anonimo")
+    tv_pass = st.text_input("Password (opzionale)", type="password")
+
+    st.markdown('<p class="section-title">Benchmark</p>', unsafe_allow_html=True)
+    benchmark = st.text_input("Simbolo benchmark", value="SPXTR", key="benchmark_val")
+
+    # ── RICERCA TICKER ────────────────────────────────────────────────────────
+    st.markdown('<p class="section-title">🔍 Cerca & Aggiungi Ticker</p>', unsafe_allow_html=True)
+
+    from streamlit_searchbox import st_searchbox
+
+    def _tv_search(query: str) -> list:
+        if not query or len(query.strip()) < 1:
+            return []
+        results = search_tv_live(query, limit=12)
+        return [(item["display"], item["tv_symbol"]) for item in results]
+
+    selected = st_searchbox(
+        _tv_search,
+        key             = "ticker_searchbox",
+        placeholder     = "es. ENI, Apple, Bitcoin, Gold...",
+        label           = "Cerca strumento",
+        clear_on_submit = True,
+        debounce        = 300,
+    )
+
+    if selected:
+        tv_sym = selected
+        if tv_sym not in st.session_state.portfolio_tickers:
+            st.session_state.portfolio_tickers.append(tv_sym)
+            st.rerun()
+        else:
+            st.caption(f"✅ {tv_sym} già nel portafoglio")
+
+    # ── LISTA TICKER CON PESI ─────────────────────────────────────────────────
+    st.markdown('<p class="section-title">📋 Portafoglio corrente</p>', unsafe_allow_html=True)
+
+    n_tickers = len(st.session_state.portfolio_tickers)
+    equal_w   = round(1.0 / n_tickers, 6) if n_tickers > 0 else 1.0
+
+    for ticker in list(st.session_state.portfolio_tickers):
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            st.markdown(
+                f"<span style='font-family:DM Mono;font-size:12px;color:#e8eaf0'>{ticker}</span>",
+                unsafe_allow_html=True
+            )
+        with col2:
+            widget_key = f"w_{ticker}"
+            if widget_key not in st.session_state:
+                st.session_state[widget_key] = round(
+                    float(st.session_state.manual_weights.get(ticker, equal_w)), 6
+                )
+            new_w = st.number_input(
+                label="peso", min_value=0.0, max_value=1.0,
+                value=round(float(st.session_state[widget_key]), 6),
+                step=0.0001, format="%.4f",
+                key=widget_key, label_visibility="collapsed"
+            )
+            st.session_state.manual_weights[ticker] = new_w
+        with col3:
+            if st.button("🗑️", key=f"del_{ticker}"):
+                st.session_state.portfolio_tickers.remove(ticker)
+                st.session_state.manual_weights.pop(ticker, None)
+                st.session_state.pop(f"w_{ticker}", None)
+                st.rerun()
+
+    # Stato pesi
+    if n_tickers > 0:
+        total_w  = sum(st.session_state.manual_weights.get(t, equal_w)
+                       for t in st.session_state.portfolio_tickers)
+        is_equal = all(abs(st.session_state.manual_weights.get(t, equal_w) - equal_w) < 1e-4
+                       for t in st.session_state.portfolio_tickers)
+        if is_equal:
+            st.caption(f"⚖️ Equal weight: {equal_w:.2%} per asset")
+        else:
+            color = "#34d399" if abs(total_w - 1.0) < 0.015 else "#f87171"
+            icon  = "✅" if abs(total_w - 1.0) < 0.015 else "⚠️"
+            st.markdown(f"<span style='font-size:12px;color:{color}'>Σ pesi: {total_w:.4f} {icon}</span>",
+                        unsafe_allow_html=True)
+            if abs(total_w - 1.0) > 0.015:
+                st.caption("I pesi verranno normalizzati automaticamente a 1.0")
+
+    if st.button("🔄 Reset Equal Weight"):
+        st.session_state.manual_weights = {}
+        for t in list(st.session_state.portfolio_tickers):
+            st.session_state.pop(f"w_{t}", None)
+        st.session_state.do_reset = False
+        st.rerun()
+
+    st.markdown('<p class="section-title">Parametri simulazione</p>', unsafe_allow_html=True)
+    num_portfolios = st.slider("Portafogli simulati", 1000, 20000, 10000, step=1000)
+    n_bars         = st.slider("Barre storiche (giorni)", 2000, 15000, 10000, step=1000)
+    st.markdown("---")
+    run_btn = st.button("🚀  AVVIA ANALISI")
+
+# ── Pesi finali ───────────────────────────────────────────────────────────────
+parsed_tickers: List[str] = list(st.session_state.portfolio_tickers)
+n_assets     = len(parsed_tickers)
+equal_weight = 1.0 / n_assets if n_assets > 0 else 1.0
+raw_weights  = np.array([st.session_state.manual_weights.get(t, equal_weight)
+                         for t in parsed_tickers])
+total_raw    = raw_weights.sum()
+if total_raw > 1e-8:
+    raw_weights = raw_weights / total_raw
+custom_weights_map = {t: float(raw_weights[i]) for i, t in enumerate(parsed_tickers)}
+parse_error  = n_assets == 0
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HEADER
+# ══════════════════════════════════════════════════════════════════════════════
+
+st.markdown("""
+<h1 style="font-size:2rem; margin-bottom:4px;">
+  📈 Frontiera Efficiente di Markowitz
+</h1>
+<p style="color:#6b7280; font-size:14px; margin-bottom:32px;">
+  Ottimizzazione Monte Carlo · Benchmark comparison · Rolling analytics
+</p>
+""", unsafe_allow_html=True)
+
+if not run_btn:
+    # Mostra portafoglio corrente in attesa
+    if parsed_tickers:
+        st.info(f"👈 Portafoglio: **{st.session_state.current_portfolio_name}** "
+                f"({len(parsed_tickers)} asset) · Premi **AVVIA ANALISI** per calcolare")
+    else:
+        st.info("👈 Configura il portafoglio nella barra laterale e premi **AVVIA ANALISI**.")
+    st.stop()
+
+if parse_error:
+    st.error("Aggiungi almeno un ticker al portafoglio.")
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ESECUZIONE ANALISI
+# ══════════════════════════════════════════════════════════════════════════════
+
+with st.spinner("Connessione a TradingView e download dati..."):
+    try:
+        price_df = download_data(parsed_tickers, benchmark, n_bars=n_bars,
+                                 tv_username=tv_user or None, tv_password=tv_pass or None)
+    except Exception as e:
+        st.error(f"❌ Errore download dati: {e}")
+        st.stop()
+
+with st.spinner("Calcolo frontiera efficiente..."):
+    all_ret, port_ret, bench_ret, mu, cov = compute_stats(price_df, benchmark)
+    res_df, wdf = simulate_frontier(port_ret, mu, cov, num_portfolios)
+    opt_w       = get_optimal_weights(res_df, wdf)
+    sel_w       = normalize_weights(port_ret.columns.tolist(), custom_weights_map)
+    opt_ret     = port_ret.dot(opt_w)
+    sel_ret     = port_ret.dot(sel_w)
+
+with st.spinner("Calcolo metriche..."):
+    ann_ret_opt = calc_ann_returns(opt_ret)
+    ann_ret_sel = calc_ann_returns(sel_ret)
+    ann_ret_ben = calc_ann_returns(bench_ret)
+    ann_dd_opt  = calc_ann_max_dd(opt_ret)
+    ann_dd_sel  = calc_ann_max_dd(sel_ret)
+    ann_dd_ben  = calc_ann_max_dd(bench_ret)
+    common_idx  = opt_ret.index.intersection(bench_ret.index).intersection(sel_ret.index)
+    cum_opt  = (1 + opt_ret.loc[common_idx]).cumprod()
+    cum_sel  = (1 + sel_ret.loc[common_idx]).cumprod()
+    cum_ben  = (1 + bench_ret.loc[common_idx]).cumprod()
+    rec_opt = calc_recovery_times(cum_opt)
+    rec_sel = calc_recovery_times(cum_sel)
+    rec_ben = calc_recovery_times(cum_ben)
+
+st.success("✅ Analisi completata!")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB — grafici (identici all'app originale)
 # ══════════════════════════════════════════════════════════════════════════════
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
